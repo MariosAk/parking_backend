@@ -81,6 +81,11 @@ app.get('/login-user', async  (req, res) => {
     const email = req.query.email;
     const password = req.query.password;
     connection.query('SELECT user_id, carType, password FROM users WHERE email=?', [email, password], async (err, results) => {
+      if(!results)
+      {
+        res.status(401).send('Error authenticating user.');
+        return;
+      }
       var stored = results[0].password;
       const passwordMatch = await bcrypt.compare(password, stored);
       if (err || !results[0].user_id || !passwordMatch) {
