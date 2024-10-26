@@ -1,3 +1,4 @@
+require('newrelic');
 const express = require('express');
 const bodyParser = require('body-parser');
 const mysql = require('mysql');
@@ -491,6 +492,7 @@ app.get('/markers', verifyToken, (req, res) => {
     const query = "SELECT user_id, longitude, latitude FROM leaving where claimedby_id IS NULL";
     connection.query(query, (err, results) => {
       if (err) {
+        newrelic.recordCustomEvent('CustomError', { message: error.message });
         console.error('Error retrieving latest record ID : ', err);
         return;
       }
