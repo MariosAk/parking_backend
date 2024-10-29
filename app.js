@@ -383,7 +383,7 @@ app.post('/register-fcmToken', verifyToken, (req, res) => {
   try {
     //CHANGE: only update if there the token isnt registered to anyone
     const user_id = req.body["user_id"];//user_id_body.results[0].user_id;
-    const fcm_token = req.body["fcm_token"];
+    const fcm_token = req.body["fcmtoken"];
     connection.query("UPDATE users SET fcm_token=? where user_id=?", [fcm_token, user_id], (err, result) => {
       if (err) {
         console.error('Error inserting fcm: ', err);
@@ -602,37 +602,30 @@ function notifyUsersToUpdate(topic) {
   try {
     const message = {
       data: {
-        update: "true"
+        score: '850',
+        time: '2:45'
       },
-      topic: topic
+      to: '/topics/' + topic
     };
-    
         getAccessToken().then(function (accessToken) {
-            // fetch("https://fcm.googleapis.com/v1/projects/pasthelwparking/messages:send", {
-            //   method: "POST",
-            //   body: JSON.stringify({
-            //     message:
-            //     {
-            //       topic: topic,
-            //       data: {
-            //         update: "true"
-            //       },
-            //     }
-            //   }
-            //   ),
-            //   headers: {
-            //     "Content-type": "application/json;",
-            //     "Authorization": 'Bearer ' + accessToken
-            //   }
-            // })
-            getMessaging().send(message)
-  .then((response) => {
-    // Response is a message ID string.
-    console.log('Successfully sent message:', response);
-  })
-  .catch((error) => {
-    console.log('Error sending message:', error);
-  });
+            fetch("https://fcm.googleapis.com/v1/projects/pasthelwparking/messages:send", {
+              method: "POST",
+              body: JSON.stringify(
+                {
+                 message:
+                 {
+                  topic: topic,
+                  data: {
+                    update: "true"
+                  },
+                }
+              }
+              ),
+              headers: {
+                "Content-type": "application/json",
+                "Authorization": 'Bearer ' + accessToken
+              }
+            })
 
         });
       }
