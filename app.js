@@ -1,4 +1,4 @@
-require('newrelic');
+const newrelic = require('newrelic');
 const express = require('express');
 const bodyParser = require('body-parser');
 const mysql = require('mysql');
@@ -12,6 +12,7 @@ const MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const SCOPES = [MESSAGING_SCOPE];
 const firebase_instance = require('./firebase');
 const verifyToken = require("./verification_middleware");
+const { getMessaging } = require('firebase-admin/messaging');
 require('dotenv').config();
 
 const app = express();
@@ -314,6 +315,17 @@ app.delete('/delete-leaving', verifyToken, (req, res) => {
   catch { }
 });
 
+app.post('/delete-marker', verifyToken, (req, res) => {
+  try {
+    const latitude = req.body["latitude"];
+    const longitude = req.body["longitude"];
+    const topic = req.body["topic"];
+    connection.query("DELETE FROM leaving WHERE latitude=? AND longitude=?", [latitude, longitude]);
+    notifyUsersToUpdate(topic);
+  }
+  catch { }
+});
+
 // Define a route for retrieving the latest coordinates
 app.get('/latest-coordinates', verifyToken, (req, res) => {
   try {
@@ -483,27 +495,28 @@ app.post('/userid-exists', verifyToken, (req, res) => {
 app.get('/markers', verifyToken, (req, res) => {
   try {
     const bounds = {
-      swLat: parseFloat(req.query.swLat), // Southwest latitude
-      swLng: parseFloat(req.query.swLng), // Southwest longitude
-      neLat: parseFloat(req.query.neLat), // Northeast latitude
-      neLng: parseFloat(req.query.neLng)  // Northeast longitude
+      swLat: parseFloat(req.query.swLat) - 0.004, // Southwest latitude
+      swLng: parseFloat(req.query.swLng) - 0.004, // Southwest longitude
+      neLat: parseFloat(req.query.neLat) + 0.004, // Northeast latitude
+      neLng: parseFloat(req.query.neLng) + 0.004   // Northeast longitude
     };
     let markersInBounds = [];
     const query = "SELECT user_id, longitude, latitude FROM leaving where claimedby_id IS NULL";
     connection.query(query, (err, results) => {
       if (err) {
-        newrelic.recordCustomEvent('CustomError', { message: error.message });
+        newrelic.recordCustomEvent('CustomError', { message: err.message });
         console.error('Error retrieving latest record ID : ', err);
         return;
       }
       // Filter markers within the bounds
       const markersInBounds = results.filter(marker => isMarkerWithinBounds(marker, bounds));
+      newrelic.recordCustomEvent('CustomError', { message: 'Success' });
       // Return filtered markers
       res.json(markersInBounds);
     });
   }
-  catch {
-
+  catch (err) {
+    newrelic.recordCustomEvent('CustomError', { message: err.message });
   }
 });
 
@@ -536,7 +549,7 @@ function isMarkerWithinBounds(marker, bounds) {
 
 function notifyUsers(latitude, longitude) {
   try {
-    connection.query("SELECT fcm_token FROM users WHERE sw_latitude <= ? AND ne_latitude >= ? AND sw_longitude <= ? AND ne_longitude >= ?", [latitude, latitude, longitude, longitude], (err, result) => {
+    connection.query("SELECT fcm_token FROM users WHERE (sw_latitude - 0.004) <= ? AND (ne_latitude + 0.004) >= ? AND (sw_longitude - 0.004) <= ? AND (ne_longitude + 0.004) >= ?", [latitude, latitude, longitude, longitude], (err, result) => {
       if (err) {
         console.error('Error getting users from bounds', err);
         return;
@@ -558,6 +571,7 @@ function notifyUsers(latitude, longitude) {
                   data: {
                     lat: latitude.toString(),
                     long: longitude.toString(),
+                    update: "false"
                     //user_id: searcher[i].user_id,
                     //cartype: results[i].carType,
                     //time: searcher[i].time.toString(),
@@ -579,6 +593,49 @@ function notifyUsers(latitude, longitude) {
       }
     });
   }
+  catch {
+
+  }
+}
+
+function notifyUsersToUpdate(topic) {
+  try {
+    const message = {
+      data: {
+        update: "true"
+      },
+      topic: topic
+    };
+    
+        getAccessToken().then(function (accessToken) {
+            // fetch("https://fcm.googleapis.com/v1/projects/pasthelwparking/messages:send", {
+            //   method: "POST",
+            //   body: JSON.stringify({
+            //     message:
+            //     {
+            //       topic: topic,
+            //       data: {
+            //         update: "true"
+            //       },
+            //     }
+            //   }
+            //   ),
+            //   headers: {
+            //     "Content-type": "application/json;",
+            //     "Authorization": 'Bearer ' + accessToken
+            //   }
+            // })
+            getMessaging().send(message)
+  .then((response) => {
+    // Response is a message ID string.
+    console.log('Successfully sent message:', response);
+  })
+  .catch((error) => {
+    console.log('Error sending message:', error);
+  });
+
+        });
+      }
   catch {
 
   }
