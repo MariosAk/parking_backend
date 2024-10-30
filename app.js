@@ -248,7 +248,7 @@ app.post('/add-leaving', verifyToken, (req, res) => {
         return;
       }
       //res.send("Inserted search successfully");
-      notifyUsers(parseFloat(latitude), parseFloat(longitude));
+      notifyUsers(parseFloat(latitude), parseFloat(longitude), "add");
     });
   }
   catch { }
@@ -321,7 +321,8 @@ app.post('/delete-marker', verifyToken, (req, res) => {
     const longitude = req.body["longitude"];
     const topic = req.body["topic"];
     connection.query("DELETE FROM leaving WHERE latitude=? AND longitude=?", [latitude, longitude]);
-    notifyUsersToUpdate(topic);
+    //notifyUsersToUpdate(topic);
+    notifyUsers(notifyUsers(parseFloat(latitude), parseFloat(longitude)), "delete");
   }
   catch { }
 });
@@ -547,7 +548,7 @@ function isMarkerWithinBounds(marker, bounds) {
     marker.longitude >= bounds.swLng && marker.longitude <= bounds.neLng;
 }
 
-function notifyUsers(latitude, longitude) {
+function notifyUsers(latitude, longitude, type) {
   try {
     connection.query("SELECT fcm_token FROM users WHERE (sw_latitude - 0.004) <= ? AND (ne_latitude + 0.004) >= ? AND (sw_longitude - 0.004) <= ? AND (ne_longitude + 0.004) >= ?", [latitude, latitude, longitude, longitude], (err, result) => {
       if (err) {
@@ -564,20 +565,11 @@ function notifyUsers(latitude, longitude) {
                 message:
                 {
                   token: result[i].fcm_token,
-                  // notification: {
-                  //   title: "A parking spot is free!",
-                  //   body: "Someone just left an empty parking for you!"
-                  // },
                   data: {
                     lat: latitude.toString(),
                     long: longitude.toString(),
-                    update: "false"
-                    //user_id: searcher[i].user_id,
-                    //cartype: results[i].carType,
-                    //time: searcher[i].time.toString(),
-                    //id: searcher[i].id.toString(),
-                    //times_skipped: times_skipped.toString(),
-                    //latestLeavingID: latestLeavingID.toString()
+                    update: "false",
+                    type: type
                   },
                 }
               }
