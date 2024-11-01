@@ -237,11 +237,11 @@ app.post('/add-searching', verifyToken, (req, res) => {
 
 app.post('/add-leaving', verifyToken, (req, res) => {
   try {
-    //const user_id_body = JSON.parse(req.body["user_id"]);
+    const currentDateTime = new Date();
     const user_id = req.body["user_id"];//user_id_body.results[0].user_id;
     const latitude = req.body["lat"];
     const longitude = req.body["long"];
-    connection.query("INSERT INTO leaving (latitude, longitude, user_id) VALUES(?, ?, ?)", [latitude, longitude, user_id], (err, result) => {
+    connection.query("INSERT INTO leaving (latitude, longitude, user_id, time) VALUES(?, ?, ?, ?)", [latitude, longitude, user_id, currentDateTime], (err, result) => {
       if (err) {
         console.error('Error inserting leaving: ', err);
         res.status(507).send('Error inserting leaving: ', err);
@@ -625,6 +625,45 @@ function notifyUsersToUpdate(topic) {
 
   }
 }
+
+function clearTwentyMinutesOld(){
+  try{
+    var topicsList = [];
+    const twentyMinutesAgo = new Date(Date.now() -  1000);
+    const query = "SELECT id, user_id, longitude, latitude FROM leaving where time < ?";
+    connection.query(query, [twentyMinutesAgo], (err, results) => {
+      if (err) {
+        newrelic.recordCustomEvent('CustomError', { message: err.message });
+        console.error('Error retrieving latest record ID : ', err);
+        return;
+      }
+      for (j = 0; j < results.length; j++) {
+        const marker = {
+          latitude: results[j].latitude,
+          longitude: results[j].longitude
+        }
+        var topic = getCellTopic(results[j].latitude, results[j].longitude);
+        if(!topicsList.includes(topic)){
+          notifyUsersToUpdate(topic);
+          topicsList.push(topic);
+        }
+      }
+    });
+  }catch{
+
+  }
+}
+
+function getCellTopic(latitude, longitude) {
+  const gridCellSize = 0.05;
+  const latCell = Math.floor(latitude / gridCellSize);
+  const lngCell = Math.floor(longitude / gridCellSize);
+  const cellTopic = `thessaloniki_${latCell}_${lngCell}`;
+  
+  return cellTopic;
+}
+
+setInterval(clearTwentyMinutesOld, 5 * 60 * 1000);
 
 // Start the server
 server.listen(port, () => {
