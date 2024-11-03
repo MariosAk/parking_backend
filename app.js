@@ -217,6 +217,23 @@ app.post('/register-user', verifyToken, async (req, res) => {
   catch { }
 });
 
+app.delete('/delete-user', verifyToken, (req, res) => {
+  try{
+    const userID = req.body["userID"];
+    connection.query("DELETE FROM users WHERE user_id = ?", [userID], (err, result) => {
+      if (err) {
+        console.error('Error deleting user: ', err);
+        res.status(506).send('Error deleting user: ', err);
+        return;
+      }
+      res.status(200).send();
+  });
+  }
+  catch{
+
+  }
+});
+
 app.post('/add-searching', verifyToken, (req, res) => {
   try {
     //const user_id_body = JSON.parse(req.body["user_id"]);
@@ -629,7 +646,7 @@ function notifyUsersToUpdate(topic) {
 function clearTwentyMinutesOld(){
   try{
     var topicsList = [];
-    const twentyMinutesAgo = new Date(Date.now() -  1000);
+    const twentyMinutesAgo = new Date(Date.now() -  5 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
     const query = "SELECT id, user_id, longitude, latitude FROM leaving where time < ?";
     connection.query(query, [twentyMinutesAgo], (err, results) => {
       if (err) {
@@ -637,6 +654,7 @@ function clearTwentyMinutesOld(){
         console.error('Error retrieving latest record ID : ', err);
         return;
       }
+      connection.query("DELETE FROM leaving WHERE time < ?", [twentyMinutesAgo]);
       for (j = 0; j < results.length; j++) {
         const marker = {
           latitude: results[j].latitude,
@@ -653,7 +671,6 @@ function clearTwentyMinutesOld(){
 
   }
 }
-
 function getCellTopic(latitude, longitude) {
   const gridCellSize = 0.05;
   const latCell = Math.floor(latitude / gridCellSize);
