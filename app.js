@@ -10,7 +10,7 @@ const bcrypt = require('bcrypt');
 const { google } = require('googleapis');
 const MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const SCOPES = [MESSAGING_SCOPE];
-const firebase_instance = require('./firebase');
+//const firebase_instance = require('./firebase');
 const verifyToken = require("./verification_middleware");
 const { getMessaging } = require('firebase-admin/messaging');
 require('dotenv').config();
@@ -24,7 +24,8 @@ const connection = mysql.createConnection({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT
 });
 const wss = new WebSocket.Server({ server });
 var previousLeavingID = -1;
@@ -37,17 +38,17 @@ wss.getUniqueID = function () {
   return s4() + s4() + '-' + s4();
 };
 
-wss.on('connection', function (ws) {
-  console.log('new connection');
-  ws.id = wss.getUniqueID();
-  uniqueID = ws.id;
-  ws.send(JSON.stringify({ userIDForCache: ws.id }));
-});
+// wss.on('connection', function (ws) {
+//   console.log('new connection');
+//   ws.id = wss.getUniqueID();
+//   uniqueID = ws.id;
+//   ws.send(JSON.stringify({ userIDForCache: ws.id }));
+// });
 
 connection.connect((err) => {
   if (err) {
     console.error('Error connecting to database: ', err);
-    res.status(505).send('Error connecting to database.: ', err);
+    //res.status(505).send('Error connecting to database.: ', err);
     return;
   }
   console.log('Connected to database!');
@@ -146,6 +147,17 @@ function getSearchersSendNotification(latitude, longitude, latestLeavingID, time
 // Use body-parser middleware to parse incoming requests
 app.use(bodyParser.json());
 
+app.get('/tasks', (req,res) => {
+  connection.query('SELECT * FROM tasks', (err, results) => {
+    if(!results)
+    {
+      res.status(500).send('Error retriving tasks.');
+      return;
+    }
+    res.send(JSON.stringify({ results }));
+  })
+});
+
 app.post('/parking-skipped', verifyToken, (req, res) => {
   try {
     const times_skipped = req.body["times_skipped"];
@@ -208,14 +220,14 @@ app.post('/register-user', verifyToken, async (req, res) => {
     connection.query('INSERT INTO users (user_id, email, password, fcm_token) VALUES (?,?,?,?)', [uid, email, hashedPassword, fcm_token], (err, result) => {
       if (err) {
         res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'register-user');
+        //logToNewRelic(err.message, 'register-user');
         return;
       }
       res.status(200).send();
     });
   }
   catch (err){ 
-    logToNewRelic(err.message, 'register-user');
+    //logToNewRelic(err.message, 'register-user');
   }
 });
 
@@ -225,14 +237,14 @@ app.delete('/delete-user', verifyToken, (req, res) => {
     connection.query("DELETE FROM users WHERE user_id = ?", [email], (err, result) => {
       if (err) {
         res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'delete-user');
+        //logToNewRelic(err.message, 'delete-user');
         return;
       }
       res.status(200).send();
   });
   }
   catch (err){
-    logToNewRelic(err.message, 'delete-user');
+    //logToNewRelic(err.message, 'delete-user');
   }
 });
 
@@ -263,7 +275,7 @@ app.post('/add-leaving', verifyToken, (req, res) => {
     connection.query("INSERT INTO leaving (latitude, longitude, user_id, time) VALUES(?, ?, ?, ?)", [latitude, longitude, user_id, currentDateTime], (err, result) => {
       if (err) {
         res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'add-leaving');
+        //logToNewRelic(err.message, 'add-leaving');
         return;
       }
       res.status(200).send();
@@ -271,7 +283,7 @@ app.post('/add-leaving', verifyToken, (req, res) => {
     });
   }
   catch (err){
-    logToNewRelic(err.message, 'add-leaving');
+    //logToNewRelic(err.message, 'add-leaving');
    }
 });
 
@@ -344,7 +356,7 @@ app.post('/delete-marker', verifyToken, (req, res) => {
     connection.query("DELETE FROM leaving WHERE latitude=? AND longitude=?", [latitude, longitude], (err, result) => {
       if(err){
         res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'delete-marker');
+        //logToNewRelic(err.message, 'delete-marker');
         return;
       }
     });
@@ -352,7 +364,7 @@ app.post('/delete-marker', verifyToken, (req, res) => {
     notifyUsers(notifyUsers(parseFloat(latitude), parseFloat(longitude)), "delete");
   }
   catch (err){
-    logToNewRelic(err.message, 'delete-marker');
+    //logToNewRelic(err.message, 'delete-marker');
    }
 });
 
@@ -417,14 +429,14 @@ app.post('/register-fcmToken', verifyToken, (req, res) => {
     connection.query("UPDATE users SET fcm_token=? where user_id=?", [fcm_token, user_id], (err, result) => {
       if (err) {
         res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'register-fcmToken');
+        //logToNewRelic(err.message, 'register-fcmToken');
         return;
       }
       res.status(200).send();
     });
   }
   catch (err){
-    logToNewRelic(err.message, 'register-fcmToken');
+    //logToNewRelic(err.message, 'register-fcmToken');
    }
 });
 
@@ -434,7 +446,7 @@ app.post('/get-userid', verifyToken, (req, res) => {
     connection.query('SELECT user_id FROM users WHERE email=?', [email], (err, results) => {
       if (err) {
         res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'get-userid');
+        //logToNewRelic(err.message, 'get-userid');
         return;
       }
       const user_id = results[0].user_id;
@@ -442,7 +454,7 @@ app.post('/get-userid', verifyToken, (req, res) => {
     });
   }
   catch (err){
-    logToNewRelic(err.message, 'get-userid');
+    //logToNewRelic(err.message, 'get-userid');
    }
 });
 
@@ -523,35 +535,97 @@ app.post('/userid-exists', verifyToken, (req, res) => {
     });
   }
   catch (err){
-    logToNewRelic(err.message, 'userid-exists');
+    //logToNewRelic(err.message, 'userid-exists');
    }
 });
 
 // API to get markers within bounds
-app.get('/markers', verifyToken, (req, res) => {
+// app.get('/markers', verifyToken, (req, res) => {
+//   try {
+//     const bounds = {
+//       swLat: parseFloat(req.query.swLat) - 0.004, // Southwest latitude
+//       swLng: parseFloat(req.query.swLng) - 0.004, // Southwest longitude
+//       neLat: parseFloat(req.query.neLat) + 0.004, // Northeast latitude
+//       neLng: parseFloat(req.query.neLng) + 0.004   // Northeast longitude
+//     };
+//     let markersInBounds = [];
+//     const query = "SELECT user_id, longitude, latitude FROM leaving where claimedby_id IS NULL";
+//     connection.query(query, (err, results) => {
+//       if (err) {
+//         res.status(500).send('Server error.');
+//         //logToNewRelic(err.message, 'markers');
+//         return;
+//       }
+//       // Filter markers within the bounds
+//       const markersInBounds = results.filter(marker => isMarkerWithinBounds(marker, bounds));
+//       // Return filtered markers
+//       res.status(200).json(markersInBounds);
+//     });
+//   }
+//   catch (err) {
+//     //logToNewRelic(err.message, 'markers');
+//   }
+// });
+
+app.get('/markers', verifyToken, async (req, res) => {
   try {
+    const swLat = parseFloat(req.query.swLat);
+    const swLng = parseFloat(req.query.swLng);
+    const neLat = parseFloat(req.query.neLat);
+    const neLng = parseFloat(req.query.neLng);
+
+    if (
+      [swLat, swLng, neLat, neLng].some(v => Number.isNaN(v))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid bounds parameters',
+      });
+    }
+
+    // padding όπως είχες
+    const padding = 0.004;
+
     const bounds = {
-      swLat: parseFloat(req.query.swLat) - 0.004, // Southwest latitude
-      swLng: parseFloat(req.query.swLng) - 0.004, // Southwest longitude
-      neLat: parseFloat(req.query.neLat) + 0.004, // Northeast latitude
-      neLng: parseFloat(req.query.neLng) + 0.004   // Northeast longitude
+      minLat: swLat - padding,
+      minLng: swLng - padding,
+      maxLat: neLat + padding,
+      maxLng: neLng + padding,
     };
-    let markersInBounds = [];
-    const query = "SELECT user_id, longitude, latitude FROM leaving where claimedby_id IS NULL";
-    connection.query(query, (err, results) => {
-      if (err) {
-        res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'markers');
-        return;
+
+    const query = `
+      SELECT user_id, longitude, latitude, time
+      FROM leaving
+      WHERE claimedby_id IS NULL
+        AND latitude BETWEEN ? AND ?
+        AND longitude BETWEEN ? AND ?
+    `;
+
+    connection.query(
+      query,
+      [bounds.minLat, bounds.maxLat, bounds.minLng, bounds.maxLng],
+      async (err, results) => {
+        if (err) {
+          console.error(err);
+          return res.status(500).json({
+            success: false,
+            message: 'Server error',
+          });
+        }
+        
+        return res.status(200).json({
+          success: true,
+          data: results,
+        });
       }
-      // Filter markers within the bounds
-      const markersInBounds = results.filter(marker => isMarkerWithinBounds(marker, bounds));
-      // Return filtered markers
-      res.status(200).json(markersInBounds);
+    );
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      success: false,
+      message: 'Unexpected server error',
     });
-  }
-  catch (err) {
-    logToNewRelic(err.message, 'markers');
   }
 });
 
@@ -565,16 +639,44 @@ app.post('/update-bounds', verifyToken, (req, res) => {
     connection.query("UPDATE users SET sw_latitude=?, sw_longitude=?, ne_latitude=?, ne_longitude=? where email=?", [swLat, swLong, neLat, neLong, email], (err, result) => {
       if (err) {
         res.status(500).send('Server error.');
-        logToNewRelic(err.message, 'update-bounds');
+        //logToNewRelic(err.message, 'update-bounds');
         return;
       }
       res.status(200).send();
     });
   }
   catch (err) {
-    logToNewRelic(err.message, 'update-bounds');
+    //logToNewRelic(err.message, 'update-bounds');
   }
 });
+
+async function getAddress(latitude, longitude) {
+  if (latitude == null || longitude == null) {
+    return null;
+  }
+
+  const url = `https://api.tomtom.com/maps/orbis/places/reverseGeocode/${latitude},${longitude}.json?key=${process.env.TOMTOM_KEY}&apiVersion=1`;
+
+  try {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const decodedResponse = await response.json();
+
+    const address =
+      decodedResponse?.addresses?.[0]?.address?.freeformAddress;
+
+    return address || null;
+
+  } catch (err) {
+    console.error('getAddress error:', err);
+    return null;
+  }
+}
+
 
 // Function to check if a marker is within bounds
 function isMarkerWithinBounds(marker, bounds) {
@@ -590,8 +692,7 @@ function notifyUsers(latitude, longitude, type) {
         return;
       }
       else {
-        getAccessToken().then(function (accessToken) {
-          console.log(accessToken);
+        getAccessToken().then(async function (accessToken) {
           for (i = 0; i < result.length; i++) {
             fetch("https://fcm.googleapis.com/v1/projects/pasthelwparking/messages:send", {
               method: "POST",
@@ -602,8 +703,9 @@ function notifyUsers(latitude, longitude, type) {
                   data: {
                     lat: latitude.toString(),
                     long: longitude.toString(),
-                    update: "false",
-                    type: type
+                    update: "true",
+                    type: type,
+                    address: await getAddress(latitude.toString(), longitude.toString())
                   },
                 }
               }
@@ -615,7 +717,6 @@ function notifyUsers(latitude, longitude, type) {
             })
           }
         });
-        result.fcm_token
       }
     });
   }
@@ -698,21 +799,21 @@ function getCellTopic(latitude, longitude) {
   return cellTopic;
 }
 
-function logToNewRelic(errorMsg, origin){
-  var url = process.env.NEW_RELIC_URL;
-  const response = fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Api-Key': process.env.NEW_RELIC_LICENSE_KEY
-    },
-    body: JSON.stringify({
-      timestamp: Date.now(),
-      message: errorMsg,
-      logtype: origin
-    })
-  })
-}
+// function logToNewRelic(errorMsg, origin){
+//   var url = process.env.NEW_RELIC_URL;
+//   const response = fetch(url, {
+//     method: 'POST',
+//     headers: {
+//       'Content-Type': 'application/json',
+//       'Api-Key': process.env.NEW_RELIC_LICENSE_KEY
+//     },
+//     body: JSON.stringify({
+//       timestamp: Date.now(),
+//       message: errorMsg,
+//       logtype: origin
+//     })
+//   })
+// }
 
 setInterval(clearTwentyMinutesOld, 1 * 60 * 1000);
 

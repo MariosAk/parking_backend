@@ -6,7 +6,7 @@ const verifyToken = async (req, res, next) => {
   if (!token) {
     return res.status(403).send("Unauthorized");
   }
-
+  
   try {
     const decodedToken = await firebase_instance.admin.auth().verifyIdToken(token);
     req.user = decodedToken; // Attach the decoded token (user info) to the request object
