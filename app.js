@@ -776,6 +776,11 @@ function clearTwentyMinutesOld(){
         console.error('Error retrieving latest record ID : ', err);
         return;
       }
+
+      if(results == null){
+        return;
+      }
+      
       connection.query("DELETE FROM leaving WHERE time < ?", [twentyMinutesAgo]);
       for (j = 0; j < results.length; j++) {
         const marker = {
