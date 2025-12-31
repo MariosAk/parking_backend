@@ -1,3 +1,5 @@
+const { createClient } = require('redis');
+
 const newrelic = require('newrelic');
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -27,9 +29,22 @@ const connection = mysql.createConnection({
   database: process.env.DB_NAME,
   port: process.env.DB_PORT
 });
+
+const redisClient = createClient({
+    username: process.env.REDIS_USER,
+    password: process.env.REDIS_PASSWORD,
+    socket: {
+        host: process.env.REDIS_HOST,
+        port: process.env.REDIS_PORT
+    }
+});
+
 const wss = new WebSocket.Server({ server });
 var previousLeavingID = -1;
 var uniqueID = '';
+
+const TWENTY_MINUTES_MS = 1200000;
+const SIXTY_MINUTES_MS = 3600000;
 
 wss.getUniqueID = function () {
   function s4() {
@@ -52,6 +67,14 @@ connection.connect((err) => {
     return;
   }
   console.log('Connected to database!');
+});
+
+redisClient.connect((err) => {
+  if (err) {
+    console.error('Error connecting to Redis: ', err);
+    return;
+  }
+  console.log('Connected to Redis!');
 });
 
 function getAccessToken() {
@@ -143,20 +166,66 @@ function getSearchersSendNotification(latitude, longitude, latestLeavingID, time
   catch { }
 }
 
+function getDemandLevel(count) {
+  if (count <= 3) return "LOW";
+  if (count <= 8) return "MEDIUM";
+  return "HIGH";
+}
 
 // Use body-parser middleware to parse incoming requests
 app.use(bodyParser.json());
 
-app.get('/tasks', (req,res) => {
-  connection.query('SELECT * FROM tasks', (err, results) => {
-    if(!results)
-    {
-      res.status(500).send('Error retriving tasks.');
-      return;
-    }
-    res.send(JSON.stringify({ results }));
-  })
+app.post("/search/heartbeat", async (req, res) => {
+  const { deviceId, latitude, longitude } = req.body;
+
+  if (!deviceId || latitude == null || longitude == null) {
+    return res.status(400).send("Invalid payload");
+  }
+
+  const cellTopic = getCellTopic(latitude, longitude);
+
+  const pipeline = redisClient.multi();
+
+  // 1️⃣ Track device → cell (for cleanup)
+  pipeline.set(
+    `search:device:${deviceId}`,
+    cellTopic
+  );
+
+  pipeline.expire(`search:device:${deviceId}`, 45);
+
+  // 2️⃣ Add device to cell set
+  pipeline.sAdd(`search:cell:${cellTopic}`, deviceId);
+
+  await pipeline.exec();
+
+  res.send({
+    ok: true,
+    cell: cellTopic
+  });
 });
+
+app.get("/search/count", async (req, res) => {
+  const { latitude, longitude } = req.query;
+
+  if (latitude == null || longitude == null) {
+    return res.status(400).send("Missing coords");
+  }
+
+  const cellTopic = getCellTopic(
+    parseFloat(latitude),
+    parseFloat(longitude)
+  );
+
+  const count = await redisClient.sCard(`search:cell:${cellTopic}`);
+
+  res.send({
+    cell: cellTopic,
+    count,
+    level: getDemandLevel(count)
+  });
+});
+
 
 app.get('/health', (req, res) => {
   res.status(200).send('ok');
@@ -186,13 +255,12 @@ app.post('/set-claimedby', verifyToken, (req, res) => {
 });
 
 // Define routes for GET and POST requests  TODO POST
-app.get('/login-user', verifyToken, async  (req, res) => {
+app.get('/login-user', verifyToken, async (req, res) => {
   try {
     const email = req.query.email;
     const password = req.query.password;
     connection.query('SELECT user_id, carType, password FROM users WHERE email=?', [email, password], async (err, results) => {
-      if(!results)
-      {
+      if (!results) {
         res.status(401).send('Error authenticating user.');
         return;
       }
@@ -230,13 +298,13 @@ app.post('/register-user', verifyToken, async (req, res) => {
       res.status(200).send();
     });
   }
-  catch (err){ 
+  catch (err) {
     //logToNewRelic(err.message, 'register-user');
   }
 });
 
 app.delete('/delete-user', verifyToken, (req, res) => {
-  try{
+  try {
     const userID = req.body["userID"];
     connection.query("DELETE FROM users WHERE user_id = ?", [email], (err, result) => {
       if (err) {
@@ -245,9 +313,9 @@ app.delete('/delete-user', verifyToken, (req, res) => {
         return;
       }
       res.status(200).send();
-  });
+    });
   }
-  catch (err){
+  catch (err) {
     //logToNewRelic(err.message, 'delete-user');
   }
 });
@@ -270,25 +338,40 @@ app.post('/add-searching', verifyToken, (req, res) => {
   catch { }
 });
 
-app.post('/add-leaving', verifyToken, (req, res) => {
+app.post('/add-leaving', verifyToken, async (req, res) => {
   try {
     const currentDateTime = new Date();
     const user_id = req.body["user_id"];//user_id_body.results[0].user_id;
     const latitude = req.body["lat"];
     const longitude = req.body["long"];
+
+    if (!user_id || !latitude || !longitude) {
+      return res.status(400).json({ error: 'Missing fields' });
+    }
+
+    const rows = await query("SELECT time FROM leaving WHERE user_id = ?", user_id);
+    if(rows.length > 0){
+      const timeDiff = Date.now() - new Date(rows[0].time).getTime();
+      if (timeDiff < TWENTY_MINUTES_MS){
+        res.status(429).send("This feature is on a 20 minutes cooldown. Try again later.");
+        return;
+      }
+    }
+
     connection.query("INSERT INTO leaving (latitude, longitude, user_id, time) VALUES(?, ?, ?, ?)", [latitude, longitude, user_id, currentDateTime], (err, result) => {
       if (err) {
         res.status(500).send('Server error.');
         //logToNewRelic(err.message, 'add-leaving');
         return;
       }
+      notifyUsersToUpdate(null, parseFloat(latitude), parseFloat(longitude), "add");
+      //notifyUsers(parseFloat(latitude), parseFloat(longitude), "add");
       res.status(200).send();
-      notifyUsers(parseFloat(latitude), parseFloat(longitude), "add");
     });
   }
-  catch (err){
+  catch (err) {
     //logToNewRelic(err.message, 'add-leaving');
-   }
+  }
 });
 
 app.put('/update-userid', verifyToken, (req, res) => {
@@ -352,24 +435,37 @@ app.delete('/delete-leaving', verifyToken, (req, res) => {
   catch { }
 });
 
-app.post('/delete-marker', verifyToken, (req, res) => {
+app.post('/delete-marker', verifyToken, async (req, res) => {
   try {
     const latitude = req.body["latitude"];
     const longitude = req.body["longitude"];
     const topic = req.body["topic"];
+    const uid = req.body["uid"];
+
+    const rows = await query("SELECT last_report_time FROM users WHERE user_id = ?", uid); 
+    
+    if(rows.length > 0){
+      const timeDiff = Date.now() - new Date(rows[0].time).getTime();
+      if (timeDiff < TWENTY_MINUTES_MS){
+        res.status(429).send("This feature is on a 20 minutes cooldown. Try again later.");
+        return;
+      }
+    }
+    
     connection.query("DELETE FROM leaving WHERE latitude=? AND longitude=?", [latitude, longitude], (err, result) => {
-      if(err){
+      if (err) {
         res.status(500).send('Server error.');
         //logToNewRelic(err.message, 'delete-marker');
         return;
       }
     });
     res.status(200).send();
-    notifyUsers(notifyUsers(parseFloat(latitude), parseFloat(longitude)), "delete");
+    //notifyUsers(notifyUsers(parseFloat(latitude), parseFloat(longitude)), "delete");
+    notifyUsersToUpdate(null, parseFloat(latitude), parseFloat(longitude), "delete");
   }
-  catch (err){
+  catch (err) {
     //logToNewRelic(err.message, 'delete-marker');
-   }
+  }
 });
 
 // Define a route for retrieving the latest coordinates
@@ -439,9 +535,9 @@ app.post('/register-fcmToken', verifyToken, (req, res) => {
       res.status(200).send();
     });
   }
-  catch (err){
+  catch (err) {
     //logToNewRelic(err.message, 'register-fcmToken');
-   }
+  }
 });
 
 app.post('/get-userid', verifyToken, (req, res) => {
@@ -457,9 +553,9 @@ app.post('/get-userid', verifyToken, (req, res) => {
       res.send({ user_id });
     });
   }
-  catch (err){
+  catch (err) {
     //logToNewRelic(err.message, 'get-userid');
-   }
+  }
 });
 
 app.post('/get-latlon', verifyToken, (req, res) => {
@@ -538,9 +634,9 @@ app.post('/userid-exists', verifyToken, (req, res) => {
       res.send('User found successfully');
     });
   }
-  catch (err){
+  catch (err) {
     //logToNewRelic(err.message, 'userid-exists');
-   }
+  }
 });
 
 // API to get markers within bounds
@@ -598,7 +694,7 @@ app.get('/markers', verifyToken, async (req, res) => {
     };
 
     const query = `
-      SELECT user_id, longitude, latitude, time
+      SELECT user_id, longitude, latitude, time, reports
       FROM leaving
       WHERE claimedby_id IS NULL
         AND latitude BETWEEN ? AND ?
@@ -616,7 +712,7 @@ app.get('/markers', verifyToken, async (req, res) => {
             message: 'Server error',
           });
         }
-        
+
         return res.status(200).json({
           success: true,
           data: results,
@@ -651,6 +747,61 @@ app.post('/update-bounds', verifyToken, (req, res) => {
   }
   catch (err) {
     //logToNewRelic(err.message, 'update-bounds');
+  }
+});
+
+app.post('/increment-report', verifyToken, async (req, res) => {
+  try {
+    const latitude = req.body["latitude"];
+    const longitude = req.body["longitude"];
+    const user_id = req.body["user_id"];
+
+    const rows = await query("SELECT last_report_time FROM users WHERE user_id = ?", user_id);
+    if(rows.length > 0){
+      const timeDiff = Date.now() - new Date(rows[0].last_report_time).getTime();
+      if (timeDiff < SIXTY_MINUTES_MS){
+        res.status(429).send("This feature is on a 60 minutes cooldown. Try again later.");
+        return;
+      }
+    }
+
+    const result = await query('SELECT reports FROM leaving WHERE latitude = ? AND longitude = ?', [latitude, longitude]);
+
+    if (result.length > 0 && result[0].reports < 5) {
+      connection.query(
+        "UPDATE leaving SET reports = reports + 1 WHERE latitude = ? AND longitude = ?",
+        [latitude, longitude],
+        (err) => {
+          if (err) {
+            res.status(500).send('Server error.');
+            return;
+          }
+          var topic = getCellTopic(latitude, longitude);
+          notifyUsersToUpdate(topic);
+          res.status(200).send();
+        }
+      );
+
+      connection.query('UPDATE users SET last_report_time = ? WHERE user_id = ?', [new Date(), user_id]);
+    }
+    else {
+      connection.query(
+        "DELETE FROM leaving WHERE latitude = ? AND longitude = ?",
+        [latitude, longitude],
+        (err) => {
+          if (err) {
+            res.status(500).send('Server error.');
+            return;
+          }
+          var topic = getCellTopic(latitude, longitude);
+          notifyUsersToUpdate(topic);
+          res.status(200).send();
+        }
+      );
+    }
+  }
+  catch (err) {
+
   }
 });
 
@@ -729,83 +880,110 @@ function notifyUsers(latitude, longitude, type) {
   }
 }
 
-function notifyUsersToUpdate(topic) {
+async function notifyUsersToUpdate (topic, latitude, longitude, type){
   try {
-    const message = {
-      data: {
-        score: '850',
-        time: '2:45'
-      },
-      to: '/topics/' + topic
-    };
-        getAccessToken().then(function (accessToken) {
-            fetch("https://fcm.googleapis.com/v1/projects/pasthelwparking/messages:send", {
-              method: "POST",
-              body: JSON.stringify(
-                {
-                 message:
-                 {
-                  topic: topic,
-                  data: {
-                    update: "true"
-                  },
-                }
-              }
-              ),
-              headers: {
-                "Content-type": "application/json",
-                "Authorization": 'Bearer ' + accessToken
-              }
-            })
+     if (topic == null){
+       topic = getCellTopic(latitude, longitude);
+       update = "false";
+       latitude = latitude.toString();
+       longitude = longitude.toString();
+       address = await getAddress(latitude, longitude)
+     }
+     else{
+      update = "true";
+      latitude = "";
+      longitude = "";
+      type = "";
+      address = "";
+     }
 
-        });
-      }
+    getAccessToken().then(async function (accessToken) {
+      fetch("https://fcm.googleapis.com/v1/projects/pasthelwparking/messages:send", {
+        method: "POST",
+        body: JSON.stringify(
+          {
+            message:
+            {
+              topic: topic,
+              data: {
+                lat: latitude,
+                long: longitude,
+                update: update,
+                type: type,
+                address: address
+              },
+            }
+          }
+        ),
+        headers: {
+          "Content-type": "application/json",
+          "Authorization": 'Bearer ' + accessToken
+        }
+      })
+
+    });
+  }
   catch {
 
   }
 }
 
-function clearTwentyMinutesOld(){
-  try{
+function clearFifteenMinutesOld() {
+  try {
     var topicsList = [];
-    const twentyMinutesAgo = new Date(Date.now() -  5 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    const date = new Date(Date.now() - 15 * 60 * 1000);
+
+    const fifteenMinutesAgo = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 19)
+      .replace('T', ' ');
+
     const query = "SELECT id, user_id, longitude, latitude FROM leaving where time < ?";
-    connection.query(query, [twentyMinutesAgo], (err, results) => {
+    connection.query(query, [fifteenMinutesAgo], (err, results) => {
       if (err) {
         newrelic.recordCustomEvent('CustomError', { message: err.message });
         console.error('Error retrieving latest record ID : ', err);
         return;
       }
 
-      if(results == null){
+      if (results == null) {
         return;
       }
-      
-      connection.query("DELETE FROM leaving WHERE time < ?", [twentyMinutesAgo]);
+
+      connection.query("DELETE FROM leaving WHERE time < ?", [fifteenMinutesAgo]);
       for (j = 0; j < results.length; j++) {
         const marker = {
           latitude: results[j].latitude,
           longitude: results[j].longitude
         }
         var topic = getCellTopic(results[j].latitude, results[j].longitude);
-        if(!topicsList.includes(topic)){
+        if (!topicsList.includes(topic)) {
           notifyUsersToUpdate(topic);
           topicsList.push(topic);
         }
       }
     });
-  }catch{
+  } catch {
 
   }
 }
 
 function getCellTopic(latitude, longitude) {
-  const gridCellSize = 0.05;
+  const gridCellSize = 0.005;
   const latCell = Math.floor(latitude / gridCellSize);
   const lngCell = Math.floor(longitude / gridCellSize);
   const cellTopic = `thessaloniki_${latCell}_${lngCell}`;
-  
+
   return cellTopic;
+}
+
+function query(sql, params) {
+  return new Promise((resolve, reject) => {
+    connection.query(sql, params, (err, results) => {
+      if (err) reject(err);
+      else resolve(results);
+    });
+  });
 }
 
 // function logToNewRelic(errorMsg, origin){
@@ -824,7 +1002,7 @@ function getCellTopic(latitude, longitude) {
 //   })
 // }
 
-setInterval(clearTwentyMinutesOld, 1 * 60 * 1000);
+setInterval(clearFifteenMinutesOld, 1 * 60 * 1000);
 
 // Start the server
 server.listen(port, () => {
