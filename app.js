@@ -175,7 +175,7 @@ function getDemandLevel(count) {
 // Use body-parser middleware to parse incoming requests
 app.use(bodyParser.json());
 
-app.post("/search/heartbeat", async (req, res) => {
+app.post("/search/heartbeat", verifyToken, async (req, res) => {
   const { deviceId, latitude, longitude } = req.body;
 
   if (!deviceId || latitude == null || longitude == null) {
@@ -192,7 +192,7 @@ app.post("/search/heartbeat", async (req, res) => {
     cellTopic
   );
 
-  pipeline.expire(`search:device:${deviceId}`, 45);
+  pipeline.expire(`search:device:${deviceId}`, 65);
 
   // 2️⃣ Add device to cell set
   pipeline.sAdd(`search:cell:${cellTopic}`, deviceId);
@@ -205,7 +205,7 @@ app.post("/search/heartbeat", async (req, res) => {
   });
 });
 
-app.get("/search/count", async (req, res) => {
+app.get("/search/count", verifyToken, async (req, res) => {
   const { latitude, longitude } = req.query;
 
   if (latitude == null || longitude == null) {
@@ -1008,3 +1008,19 @@ setInterval(clearFifteenMinutesOld, 1 * 60 * 1000);
 server.listen(port, () => {
   console.log(`Server listening on port ${port}`);
 });
+
+setInterval(async () => {
+  const cellKeys = await redisClient.keys("search:cell:*");
+
+  for (const cellKey of cellKeys) {
+    const devices = await redisClient.sMembers(cellKey);
+
+    for (const deviceId of devices) {
+      const exists = await redisClient.exists(`search:device:${deviceId}`);
+
+      if (!exists) {
+        await redisClient.sRem(cellKey, deviceId);
+      }
+    }
+  }
+}, 30000);
