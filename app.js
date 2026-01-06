@@ -349,14 +349,14 @@ app.post('/add-leaving', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Missing fields' });
     }
 
-    const rows = await query("SELECT time FROM leaving WHERE user_id = ?", user_id);
-    if(rows.length > 0){
-      const timeDiff = Date.now() - new Date(rows[0].time).getTime();
-      if (timeDiff < TWENTY_MINUTES_MS){
-        res.status(429).send("This feature is on a 20 minutes cooldown. Try again later.");
-        return;
-      }
-    }
+    // const rows = await query("SELECT last_declare_time FROM users WHERE user_id = ?", user_id);
+    // if(rows.length > 0){
+    //   const timeDiff = Date.now() - new Date(rows[0].time).getTime();
+    //   if (timeDiff < TWENTY_MINUTES_MS){
+    //     res.status(429).send("This feature is on a 20 minutes cooldown. Try again later.");
+    //     return;
+    //   }
+    // }
 
     connection.query("INSERT INTO leaving (latitude, longitude, user_id, time) VALUES(?, ?, ?, ?)", [latitude, longitude, user_id, currentDateTime], (err, result) => {
       if (err) {
@@ -368,6 +368,8 @@ app.post('/add-leaving', verifyToken, async (req, res) => {
       //notifyUsers(parseFloat(latitude), parseFloat(longitude), "add");
       res.status(200).send();
     });
+
+    connection.query("UPDATE users SET last_declare_time = ? WHERE user_id = ?", [currentDateTime, user_id]);
   }
   catch (err) {
     //logToNewRelic(err.message, 'add-leaving');
@@ -756,14 +758,14 @@ app.post('/increment-report', verifyToken, async (req, res) => {
     const longitude = req.body["longitude"];
     const user_id = req.body["user_id"];
 
-    const rows = await query("SELECT last_report_time FROM users WHERE user_id = ?", user_id);
-    if(rows.length > 0){
-      const timeDiff = Date.now() - new Date(rows[0].last_report_time).getTime();
-      if (timeDiff < SIXTY_MINUTES_MS){
-        res.status(429).send("This feature is on a 60 minutes cooldown. Try again later.");
-        return;
-      }
-    }
+    // const rows = await query("SELECT last_report_time FROM users WHERE user_id = ?", user_id);
+    // if(rows.length > 0){
+    //   const timeDiff = Date.now() - new Date(rows[0].last_report_time).getTime();
+    //   if (timeDiff < SIXTY_MINUTES_MS){
+    //     res.status(429).send("This feature is on a 60 minutes cooldown. Try again later.");
+    //     return;
+    //   }
+    // }
 
     const result = await query('SELECT reports FROM leaving WHERE latitude = ? AND longitude = ?', [latitude, longitude]);
 
@@ -778,11 +780,13 @@ app.post('/increment-report', verifyToken, async (req, res) => {
           }
           var topic = getCellTopic(latitude, longitude);
           notifyUsersToUpdate(topic);
-          res.status(200).send();
+
+          var dateNow = new Date();
+          connection.query('UPDATE users SET last_report_time = ? WHERE user_id = ?', [dateNow, user_id]);
+
+          res.status(200).json({ dateNow });
         }
       );
-
-      connection.query('UPDATE users SET last_report_time = ? WHERE user_id = ?', [new Date(), user_id]);
     }
     else {
       connection.query(
@@ -795,7 +799,8 @@ app.post('/increment-report', verifyToken, async (req, res) => {
           }
           var topic = getCellTopic(latitude, longitude);
           notifyUsersToUpdate(topic);
-          res.status(200).send();
+          var dateNow = new Date();
+          res.status(200).json({ dateNow });
         }
       );
     }
@@ -803,6 +808,40 @@ app.post('/increment-report', verifyToken, async (req, res) => {
   catch (err) {
 
   }
+});
+
+app.get('/user-last-report-time', verifyToken, async (req, res) => {
+  const user_id = req.query["user_id"];
+  connection.query(
+    "SELECT last_report_time FROM users WHERE user_id = ?",
+    [user_id],
+    (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: 'Unexpected server error',
+        });
+      }
+      res.send(result[0].last_report_time);
+    }
+  );
+});
+
+app.get('/user-last-declare-time', verifyToken, async (req, res) => {
+  const user_id = req.query["user_id"];
+  connection.query(
+    "SELECT last_declare_time FROM users WHERE user_id = ?",
+    [user_id],
+    (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: 'Unexpected server error',
+        });
+      }
+      res.send(result[0].last_declare_time);
+    }
+  );
 });
 
 async function getAddress(latitude, longitude) {
