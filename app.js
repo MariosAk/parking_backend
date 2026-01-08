@@ -822,6 +822,13 @@ app.get('/user-last-report-time', verifyToken, async (req, res) => {
           message: 'Unexpected server error',
         });
       }
+
+      if(result == null || result.length ==0){
+        return res.send({
+          last_declare_time: "1970-01-01T00:00:00Z"
+        });
+      }
+      
       res.send(result[0].last_report_time);
     }
   );
@@ -839,6 +846,13 @@ app.get('/user-last-declare-time', verifyToken, async (req, res) => {
           message: 'Unexpected server error',
         });
       }
+
+      if(result == null || result.length ==0){
+        return res.send({
+          last_declare_time: "1970-01-01T00:00:00Z"
+        });
+      }
+
       res.send(result[0].last_declare_time);
     }
   );
@@ -985,7 +999,7 @@ function clearFifteenMinutesOld() {
         return;
       }
 
-      if (results == null) {
+      if (results == null || results.length == 0) {
         return;
       }
 
