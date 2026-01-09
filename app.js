@@ -728,14 +728,14 @@ app.post('/increment-report', verifyToken, async (req, res) => {
     const longitude = req.body["longitude"];
     const user_id = req.body["user_id"];
 
-    // const rows = await query("SELECT last_report_time FROM users WHERE user_id = ?", user_id);
-    // if(rows.length > 0){
-    //   const timeDiff = Date.now() - new Date(rows[0].last_report_time).getTime();
-    //   if (timeDiff < SIXTY_MINUTES_MS){
-    //     res.status(429).send("This feature is on a 60 minutes cooldown. Try again later.");
-    //     return;
-    //   }
-    // }
+    const rows = await query("SELECT last_report_time FROM users WHERE user_id = ?", user_id);
+    if(rows.length > 0){
+      const timeDiff = Date.now() - new Date(rows[0].last_report_time).getTime();
+      if (timeDiff < SIXTY_MINUTES_MS){
+        res.status(429).send("This feature is on a 60 minutes cooldown. Try again later.");
+        return;
+      }
+    }
 
     const result = await query('SELECT reports FROM leaving WHERE latitude = ? AND longitude = ?', [latitude, longitude]);
 
