@@ -991,8 +991,8 @@ function clearFifteenMinutesOld() {
       .slice(0, 19)
       .replace('T', ' ');
 
-    const query = "SELECT id, user_id, longitude, latitude FROM leaving where time < ?";
-    connection.query(query, [fifteenMinutesAgo], (err, results) => {
+    const query = "SELECT longitude, latitude FROM leaving where expires_at < NOW()";
+    connection.query(query, (err, results) => {
       if (err) {
         newrelic.recordCustomEvent('CustomError', { message: err.message });
         console.error('Error retrieving latest record ID : ', err);
@@ -1003,12 +1003,9 @@ function clearFifteenMinutesOld() {
         return;
       }
 
-      connection.query("DELETE FROM leaving WHERE time < ?", [fifteenMinutesAgo]);
+      connection.query("DELETE FROM leaving WHERE expires_at < NOW()");
+
       for (j = 0; j < results.length; j++) {
-        const marker = {
-          latitude: results[j].latitude,
-          longitude: results[j].longitude
-        }
         var topic = getCellTopic(results[j].latitude, results[j].longitude);
         if (!topicsList.includes(topic)) {
           notifyUsersToUpdate(topic);
