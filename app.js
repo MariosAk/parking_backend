@@ -254,42 +254,12 @@ app.post('/set-claimedby', verifyToken, (req, res) => {
   catch { }
 });
 
-// Define routes for GET and POST requests  TODO POST
-app.get('/login-user', verifyToken, async (req, res) => {
-  try {
-    const email = req.query.email;
-    const password = req.query.password;
-    connection.query('SELECT user_id, carType, password FROM users WHERE email=?', [email, password], async (err, results) => {
-      if (!results) {
-        res.status(401).send('Error authenticating user.');
-        return;
-      }
-      var stored = results[0].password;
-      const passwordMatch = await bcrypt.compare(password, stored);
-      if (err || !results[0].user_id || !passwordMatch) {
-        console.error('Error at login: ', err);
-        res.status(401).send('Error authenticating user.');
-        return;
-      }
-      res.send(JSON.stringify({ results, status: "Login successful", carType: results[0].carType }));
-    });
-  }
-  catch { }
-});
-
 app.post('/register-user', verifyToken, async (req, res) => {
   try {
     // Extract the user data from the request body
-    const { uid, email, password, fcm_token } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    // const response = await firebase_instance.admin.auth().createUser({
-    //   email: email,
-    //   password: hashedPassword,
-    //   emailVerified: false,
-    //   disabled: false
-    // });
+    const { uid, email, fcm_token } = req.body;
     // Perform an INSERT query to add the user to the database
-    connection.query('INSERT INTO users (user_id, email, password, fcm_token) VALUES (?,?,?,?)', [uid, email, hashedPassword, fcm_token], (err, result) => {
+    connection.query('INSERT INTO users (user_id, email, fcm_token) VALUES (?,?,?)', [uid, email, fcm_token], (err, result) => {
       if (err) {
         res.status(500).send('Server error.');
         //logToNewRelic(err.message, 'register-user');
@@ -856,6 +826,23 @@ app.get('/user-last-declare-time', verifyToken, async (req, res) => {
       res.send(result[0].last_declare_time);
     }
   );
+});
+
+app.post('/register-premium-interest', verifyToken, (req, res) => {
+  try {
+    const email = req.body["email"];
+    connection.query("UPDATE users SET interested_in_premium = 1 where email= ?", [email], (err, result) => {
+      if (err) {
+        res.status(500).send('Server error.');
+        //logToNewRelic(err.message, 'register-premium-interest');
+        return;
+      }
+      res.status(200).send();
+    });
+  }
+  catch (err) {
+    //logToNewRelic(err.message, 'register-premium-interest');
+  }
 });
 
 async function getAddress(latitude, longitude) {
